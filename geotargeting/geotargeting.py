@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from rasterstats import zonal_stats
 from clize import Parameter, run
+import rasterio
 import os
 import argparse
 
@@ -34,7 +35,7 @@ def algo(pop_path, mean_lim, max_lim, cities, min_rad):
     finished = kicked_out
     i = 0
     while cities.shape[0] > 0 and i < 10:
-        print(i)
+        print(f"Round: {i}")
         i += 1
         inner = outer
         outer += 1000
@@ -61,10 +62,24 @@ def filter_overlap(finished):
     return finished.drop(bads).reset_index(drop=True)
 
 
+def get_total_population(pop_path):
+    dataset = rasterio.open(pop_path)
+    return dataset.read(1, masked=True).sum()
+
+
 def add_total_population(finished, pop_path):
     stats = zonal_stats(finished.to_crs(4326), pop_path, stats=['sum'])
     total_pop = [round(d['sum']) for d in stats]
     finished['overlap_population'] = total_pop
+
+    tot = get_total_population(pop_path)
+    tot_covered = finished.overlap_population.sum()
+
+    print(f"""
+Total Population: {tot}
+Covered Population: {tot_covered}
+Covered Ratio: {tot_covered / tot}
+    """)
     return finished
 
 
@@ -99,18 +114,25 @@ def prepare_targeting(city_shapes, regions, name_var_region):
             return [x.strip() for x in s[name_var_region]]
         return []
 
-    overlaps = [{'region': s, 'name': c['name']} for _, c in city_shapes.iterrows() for s in get_states(c.geometry)]
-    cities = [{'region': s, 'name': c['name']} for _, c in city_shapes.iterrows() for s in get_states(c.geometry.centroid)]
+    overlaps = [{'region': s, 'name': c['name'], 'total_population': c.overlap_population} for _, c in city_shapes.iterrows() for s in get_states(c.geometry)]
+    cities = [{'region': s, 'name': c['name'], 'total_population': c.overlap_population} for _, c in city_shapes.iterrows() for s in get_states(c.geometry.centroid)]
 
     def prep(x):
         return (pd.DataFrame(x)
-                .merge(city_shapes)[['region', 'name', 'rad', 'lat', 'lng']]
+                .merge(city_shapes)[['region', 'name', 'total_population', 'rad', 'lat', 'lng']]
                 .sort_values('name').reset_index(drop=True))
 
     return prep(cities), prep(overlaps)
 
 
 def main(populated_places_path, population_raster_path, mean_minimum, max_minimum, out_dir, admin_shapes = None, admin_shape_key = None):
+
+    print(f"""
+Generating buffers based on:
+
+Mean Minimum: {mean_minimum}
+Max Minimum: {max_minimum}
+    """)
 
     finished = make_city_shapes(mean_minimum,
                             max_minimum,
