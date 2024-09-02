@@ -6,6 +6,7 @@ from clize import Parameter, run
 import rasterio
 import os
 import argparse
+import json
 
 def buffer_city(pop_path, cities, o, i):
     proposed = cities.to_crs(3857).buffer(o)
@@ -75,12 +76,8 @@ def add_total_population(finished, pop_path):
     tot = get_total_population(pop_path)
     tot_covered = finished.overlap_population.sum()
 
-    print(f"""
-Total Population: {tot}
-Covered Population: {tot_covered}
-Covered Ratio: {tot_covered / tot}
-    """)
-    return finished
+    stats = {'total': float(tot), 'total_covered': float(tot_covered)}
+    return finished, stats
 
 
 def make_city_shapes(mean_lim, max_lim, populated_places, population_density, place_types = {'city'}, min_rad = 1.0):
@@ -90,8 +87,8 @@ def make_city_shapes(mean_lim, max_lim, populated_places, population_density, pl
     cities = places[places.place.isin(place_types)].reset_index(drop=True)
     finished = algo(population_density, mean_lim, max_lim, cities, min_rad)
     finished = filter_overlap(finished)
-    finished = add_total_population(finished, population_density)
-    return finished
+    finished, stats = add_total_population(finished, population_density)
+    return finished, stats
 
 
 def _get_overlap(base, shape, name_var):
@@ -124,6 +121,11 @@ def prepare_targeting(city_shapes, regions, name_var_region):
 
     return prep(cities), prep(overlaps)
 
+def make_report(mean_minimum, max_minimum, stats):
+    report = {'parameters': {'mean_minimum': mean_minimum, 'max_minimum': max_minimum}, 'statistics': stats}
+
+    return json.dumps(report)
+
 
 def main(populated_places_path, population_raster_path, mean_minimum, max_minimum, out_dir, admin_shapes = None, admin_shape_key = None):
 
@@ -134,7 +136,7 @@ Mean Minimum: {mean_minimum}
 Max Minimum: {max_minimum}
     """)
 
-    finished = make_city_shapes(mean_minimum,
+    finished, stats = make_city_shapes(mean_minimum,
                             max_minimum,
                             populated_places_path,
                             population_raster_path,
@@ -142,6 +144,11 @@ Max Minimum: {max_minimum}
                             2.0)
 
     finished.to_file(os.path.join(out_dir, "urban-areas.shp"))
+
+    report = make_report(mean_minimum, max_minimum, stats)
+
+    with open(os.path.join(out_dir, "report.json"), "w") as f:
+        f.write(report)
 
     if admin_shapes and admin_shape_key:
         cities, overlaps = prepare_targeting(finished, admin_shapes, admin_shape_key)
