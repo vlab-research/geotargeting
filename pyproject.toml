@@ -18,3 +18,7 @@ clize = "^5.0.2"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+vlab_geotarget = 'geotargeting.geotargeting:run'
