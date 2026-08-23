@@ -9,8 +9,9 @@ import argparse
 import json
 
 def buffer_city(pop_path, cities, o, i):
-    proposed = cities.to_crs(3857).buffer(o)
-    previous = cities.to_crs(3857).buffer(i)
+    seeds = gpd.GeoSeries(cities['seed'].values, index=cities.index, crs=3857)
+    proposed = seeds.buffer(o)
+    previous = seeds.buffer(i)
     cc = proposed.difference(previous)
     cc = cc.to_crs(4326)
     stats = zonal_stats(cc, pop_path)
@@ -28,14 +29,19 @@ def step(pop_path, mean_lim, max_lim, cities, o, i):
     return proposed[mask], proposed[~mask]
 
 
-def algo(pop_path, mean_lim, max_lim, cities, min_rad):
+def algo(pop_path, mean_lim, max_lim, cities, min_rad, max_rounds):
+    # keep the seed points: every ring is measured from the ORIGINAL point,
+    # not from the previous round's disk (which compounds the radius)
+    cities = cities.copy()
+    cities['seed'] = cities.to_crs(3857).geometry.values
+
     # first round
     outer = 1000
     inner = 0
     cities, kicked_out = step(pop_path, mean_lim, max_lim, cities, outer, inner)
     finished = kicked_out
     i = 0
-    while cities.shape[0] > 0 and i < 10:
+    while cities.shape[0] > 0 and i < max_rounds:
         print(f"Round: {i}")
         i += 1
         inner = outer
@@ -45,6 +51,7 @@ def algo(pop_path, mean_lim, max_lim, cities, min_rad):
         cities = survived.reset_index(drop=True)
 
     finished = pd.concat([finished, cities])
+    finished = finished.drop(columns=['seed'])
     return finished[finished.rad >= min_rad].reset_index(drop=True)
 
 
@@ -80,12 +87,12 @@ def add_total_population(finished, pop_path):
     return finished, stats
 
 
-def make_city_shapes(mean_lim, max_lim, populated_places, population_density, place_types = {'city'}, min_rad = 1.0):
+def make_city_shapes(mean_lim, max_lim, populated_places, population_density, place_types = {'city'}, min_rad = 1.0, max_rounds = 30):
     places = gpd.read_file(populated_places)
     if not places.crs:
         places = places.set_crs(4326)
     cities = places[places.place.isin(place_types)].reset_index(drop=True)
-    finished = algo(population_density, mean_lim, max_lim, cities, min_rad)
+    finished = algo(population_density, mean_lim, max_lim, cities, min_rad, max_rounds)
     finished = filter_overlap(finished)
     finished, stats = add_total_population(finished, population_density)
     return finished, stats
@@ -127,7 +134,7 @@ def make_report(mean_minimum, max_minimum, stats):
     return json.dumps(report)
 
 
-def main(populated_places_path, population_raster_path, mean_minimum, max_minimum, out_dir, admin_shapes = None, admin_shape_key = None):
+def main(populated_places_path, population_raster_path, mean_minimum, max_minimum, out_dir, admin_shapes = None, admin_shape_key = None, max_rounds = 30):
 
     print(f"""
 Generating buffers based on:
@@ -141,7 +148,8 @@ Max Minimum: {max_minimum}
                             populated_places_path,
                             population_raster_path,
                             {'city', 'town'},
-                            2.0)
+                            2.0,
+                            max_rounds)
 
     finished.to_file(os.path.join(out_dir, "urban-areas.shp"))
 
@@ -166,6 +174,7 @@ def run():
     parser.add_argument('-admin', '--admin-shapes',  type=str, required=True)
     parser.add_argument('-key', '--admin-shape-key',  type=str, required=True)
     parser.add_argument('-out', '--out-dir',  type=str, required=True)
+    parser.add_argument('-rounds', '--max-rounds',  type=int, default=30)
 
     args = parser.parse_args()
 
@@ -175,6 +184,7 @@ def run():
          args.max_minimum,
          args.out_dir,
          args.admin_shapes,
-         args.admin_shape_key)
+         args.admin_shape_key,
+         args.max_rounds)
 
 run()

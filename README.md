@@ -35,3 +35,4 @@ You will then get a set of files in the location designated by the `-out` parame
 `key` - The column for the "name" of the administrative region
 `mean` - The mean density for each concentric ring to be considered "urban." Once the next ring falls below this threshold, the circles will stop growing.
 `max` - The max minimum for each concentric ring to be considered "urban." Once the next ring falls below this threshold, the circles will stop growing.
+`rounds` - Optional, default 30. The maximum number of 1km rings a circle may grow, and therefore the maximum radius in km. Raise it if large metros come out pinned at exactly this radius.
